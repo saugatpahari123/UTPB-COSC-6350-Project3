@@ -1,36 +1,48 @@
-
 import socket
-import Crypto
+import hashlib
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 # Constants
-SERVER_HOST = '127.0.0.1'  # Change this to the server's IP if it's running on a different machine
-SERVER_PORT = 5555         # Port number for the TCP connection
+SERVER_HOST = '127.0.0.1'
+SERVER_PORT = 5555
+PACKET_SIZE = 1024
 
+# AES decryption
+def aes_decrypt(data, key):
+    iv = data[:16]
+    ciphertext = data[16:]
+    cipher = Cipher(algorithms.AES(key), modes.CFB(iv))
+    decryptor = cipher.decryptor()
+    return decryptor.update(ciphertext) + decryptor.finalize()
 
-# Function to connect to the server and send packets
 def tcp_client():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-        try:
-            # Connect to the server
-            client_socket.connect((SERVER_HOST, SERVER_PORT))
-            print(f"[INFO] Connected to {SERVER_HOST}:{SERVER_PORT}")
+        client_socket.connect((SERVER_HOST, SERVER_PORT))
+        print(f"[INFO] Connected to {SERVER_HOST}:{SERVER_PORT}")
 
-            # Send the packet
-            print(f"[INFO] Sending: {}")
-            client_socket.sendall(.encode('utf-8'))
+        # Receive total packet count
+        total_packets = int(client_socket.recv(1024).decode())
+        print(f"[INFO] Total packets to decode: {total_packets}")
+        client_socket.sendall(b'ACK')
 
-            # Wait for acknowledgment
-            ack = client_socket.recv(1024).decode('utf-8')
-            print(f"[INFO] Received acknowledgment: {ack}")
+        received_data = ""
+        for i in range(total_packets):
+            encrypted_packet = client_socket.recv(16 + PACKET_SIZE)  # IV + Ciphertext
+            key = hashlib.sha256(f"packet-{i}".encode()).digest()[:16]
+            try:
+                decrypted_packet = aes_decrypt(encrypted_packet, key).decode()
+                received_data += decrypted_packet
+                client_socket.sendall(b'ACK')
+            except Exception as e:
+                print(f"[WARN] Failed to decrypt packet {i}: {e}")
+                client_socket.sendall(b'NACK')
 
-            # Close the connection (initiate the FIN/ACK handshake)
-            print(f"[INFO] Initiating connection close.")
-            client_socket.shutdown(socket.SHUT_RDWR)
-        except Exception as e:
-            print(f"[ERROR] An error occurred: {e}")
-        finally:
-            print(f"[INFO] Connection closed.")
-
+        end_signal = client_socket.recv(1024)
+        if end_signal == b'END':
+            print("[INFO] Transmission complete.")
+            print(f"[INFO] Received data: {received_data}")
+        else:
+            print("[WARN] Unexpected end signal.")
 
 if __name__ == "__main__":
     tcp_client()
