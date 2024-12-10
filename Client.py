@@ -1,48 +1,70 @@
+# Client.py
 import socket
-import hashlib
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.padding import PKCS7
+from Crypto import keys  # Import keys dictionary
 
 # Constants
 SERVER_HOST = '127.0.0.1'
 SERVER_PORT = 5555
-PACKET_SIZE = 1024
+OUTPUT_FILE = 'reconstructed_file.txt'
 
-# AES decryption
+# Decrypt data using AES with the given key
 def aes_decrypt(data, key):
-    iv = data[:16]
-    ciphertext = data[16:]
-    cipher = Cipher(algorithms.AES(key), modes.CFB(iv))
+    key_bytes = bytes.fromhex(key)
+    cipher = Cipher(algorithms.AES(key_bytes), modes.ECB())
     decryptor = cipher.decryptor()
-    return decryptor.update(ciphertext) + decryptor.finalize()
+    unpadder = PKCS7(128).unpadder()
+    decrypted_padded = decryptor.update(data) + decryptor.finalize()
+    decrypted = unpadder.update(decrypted_padded) + unpadder.finalize()
+    return decrypted.decode('utf-8')
 
+# Client logic
 def tcp_client():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-        client_socket.connect((SERVER_HOST, SERVER_PORT))
-        print(f"[INFO] Connected to {SERVER_HOST}:{SERVER_PORT}")
+        try:
+            client_socket.connect((SERVER_HOST, SERVER_PORT))
+            print(f"[INFO] Connected to {SERVER_HOST}:{SERVER_PORT}")
 
-        # Receive total packet count
-        total_packets = int(client_socket.recv(1024).decode())
-        print(f"[INFO] Total packets to decode: {total_packets}")
-        client_socket.sendall(b'ACK')
+            total_crumbs = int(client_socket.recv(1024).decode('utf-8'))
+            client_socket.sendall(b'ACK')  # Acknowledge receipt
 
-        received_data = ""
-        for i in range(total_packets):
-            encrypted_packet = client_socket.recv(16 + PACKET_SIZE)  # IV + Ciphertext
-            key = hashlib.sha256(f"packet-{i}".encode()).digest()[:16]
-            try:
-                decrypted_packet = aes_decrypt(encrypted_packet, key).decode()
-                received_data += decrypted_packet
-                client_socket.sendall(b'ACK')
-            except Exception as e:
-                print(f"[WARN] Failed to decrypt packet {i}: {e}")
-                client_socket.sendall(b'NACK')
+            crumbs = [None] * total_crumbs
+            num_decoded = 0
 
-        end_signal = client_socket.recv(1024)
-        if end_signal == b'END':
-            print("[INFO] Transmission complete.")
-            print(f"[INFO] Received data: {received_data}")
-        else:
-            print("[WARN] Unexpected end signal.")
+            while num_decoded < total_crumbs:
+                encrypted_data = client_socket.recv(1024)
+                if encrypted_data == b'END':
+                    print("[INFO] End of transmission.")
+                    break
+                encrypted_data = bytes.fromhex(encrypted_data.decode('utf-8'))
+
+                if encrypted_data == b'END':
+                    print("[INFO] End of transmission.")
+                    break
+
+                for crumb, key in keys.items():
+                    try:
+                        decrypted_chunk = aes_decrypt(encrypted_data, key)
+                        if decrypted_message == "some string":
+                            crumb_index = crumbs.index(None)
+                            crumbs[crumb_index] = crumb
+                            num_decoded += 1
+                            client_socket.sendall(b'ACK')
+                            break
+                    except Exception:
+                        continue
+
+            with open(OUTPUT_FILE, 'w') as f:
+                for crumb in crumbs:
+                    if crumb is not None:
+                        f.write(crumb)
+
+            print(f"[INFO] File reconstruction complete. Saved as {OUTPUT_FILE}.")
+        except Exception as e:
+            print(f"[ERROR] {e}")
+        finally:
+            print("[INFO] Connection closed.")
 
 if __name__ == "__main__":
     tcp_client()
