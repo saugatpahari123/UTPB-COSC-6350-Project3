@@ -4,33 +4,33 @@ from cryptography.hazmat.primitives import padding
 import os
 
 # Predefined encryption keys for 2-bit crumbs
+# keys.py
 keys = {
-    0b00: 0xd7ffe8f10f124c56918a614acfc65814,
-    0b01: 0x5526736ddd6c4a0592ed33cbc5b1b76d,
-    0b10: 0x88863eef1a37427ea0b867227f09a7c1,
-    0b11: 0x45355f125db4449eb07415e8df5e27d4
+    "00": "d7ffe8f10f124c56918a614acfc65814",
+    "01": "5526736ddd6c4a0592ed33cbc5b1b76d",
+    "10": "88863eef1a37427ea0b867227f09a7c1",
+    "11": "45355f125db4449eb07415e8df5e27d4"
 }
 
+# def aes_encrypt(data, key):
+#     """
+#     Encrypt data using AES.
+#     :param data: The data to encrypt (str or bytes).
+#     :param key: The encryption key (16 bytes for AES-128).
+#     :return: Encrypted data (bytes).
+#     """
+#     if isinstance(data, str):
+#         print(f"[DEBUG] Encoding string to bytes: {data}")
+#         data = data.encode()  # Convert string to bytes
+#     elif isinstance(data, bytes):
+#         print(f"[DEBUG] Data already in bytes: {data}")
+#     else:
+#         raise ValueError(f"[ERROR] Unsupported data type for encryption: {type(data)}")
 
-def aes_encrypt(data, key):
-    """
-    Encrypt data using AES.
-    :param data: The data to encrypt (str or bytes).
-    :param key: The encryption key (16 bytes for AES-128).
-    :return: Encrypted data (bytes).
-    """
-    if isinstance(data, str):
-        print(f"[DEBUG] Encoding string to bytes: {data}")
-        data = data.encode()  # Convert string to bytes
-    elif isinstance(data, bytes):
-        print(f"[DEBUG] Data already in bytes: {data}")
-    else:
-        raise ValueError(f"[ERROR] Unsupported data type for encryption: {type(data)}")
-
-    iv = os.urandom(16)
-    cipher = Cipher(algorithms.AES(key), modes.CFB(iv))
-    encryptor = cipher.encryptor()
-    return iv + encryptor.update(data) + encryptor.finalize()
+#     iv = os.urandom(16)
+#     cipher = Cipher(algorithms.AES(key), modes.CFB(iv))
+#     encryptor = cipher.encryptor()
+#     return iv + encryptor.update(data) + encryptor.finalize()
 
 
 def aes_decrypt(ciphertext, key):

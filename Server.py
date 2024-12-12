@@ -1,19 +1,19 @@
-# Server.py
 import socket
 import threading
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.padding import PKCS7
 import os
-from Crypto import keys  # Load keys dictionary from Crypto.py
+from Crypto import keys  # Import the shared keys
 
-# Constants
+# Server Constants
 HOST = '127.0.0.1'
 PORT = 5555
 FILE_PATH = 'file_to_send.txt'
+STANDARD_PAYLOAD = "The quick brown fox jumps over the lazy dog."
 
 # Encrypt data using AES with the given key
-def aes_encrypt(data, key):
-    key_bytes = bytes.fromhex(key)
+def aes_encrypt(data, key_hex):
+    key_bytes = bytes.fromhex(key_hex)
     cipher = Cipher(algorithms.AES(key_bytes), modes.ECB())
     encryptor = cipher.encryptor()
     padder = PKCS7(128).padder()
@@ -21,67 +21,86 @@ def aes_encrypt(data, key):
     encrypted = encryptor.update(padded_data) + encryptor.finalize()
     return encrypted
 
-# Handle each client connection
-def handle_client(client_socket, file_bytes, crumbs):
+def client_handler(client_socket, crumbs):
+    """
+    Handle communication with a single client:
+    - Send total crumb count
+    - Wait for ACK
+    - Send encrypted packets corresponding to each crumb until 100% decoded by client
+    """
+
     try:
         total_crumbs = len(crumbs)
+        # Send total number of crumbs
         client_socket.send(str(total_crumbs).encode('utf-8'))
-        client_socket.recv(1024)  # Wait for ACK
+        ack = client_socket.recv(1024)
+        if ack.decode('utf-8') != 'ACK':
+            print("[ERROR] Client did not ACK total_crumbs.")
+            return
 
-        progress = [False] * total_crumbs
+        decoded_count = 0
+        current_index = 0
 
-        while not all(progress):
-            for index, crumb in enumerate(crumbs):
-                if progress[index]:
-                    continue
+        while decoded_count < total_crumbs:
+            crumb = crumbs[current_index]
+            key_hex = keys[crumb]
+            encrypted_packet = aes_encrypt(STANDARD_PAYLOAD, key_hex)
 
-                key = keys.get(crumb)
-                if key is None:
-                    print(f"[ERROR] Key not found for crumb: {crumb}")
-                    continue
-                chunk = file_bytes[index:index + 16]
-                encrypted_data = aes_encrypt(chunk, key).hex().encode('utf-8')
-                client_socket.send(encrypted_data)
+            # Send the encrypted packet
+            client_socket.send(encrypted_packet)
 
-                response = client_socket.recv(1024)
-                if response == b'ACK':
-                    progress[index] = True
+            # Receive client response
+            response = client_socket.recv(1024).decode('utf-8')
 
+            if response.startswith("DECODED:"):
+                decoded_index = int(response.split(":")[1])
+                decoded_count += 1
+                progress = (decoded_count / total_crumbs) * 100
+                print(f"[INFO] Client decoded crumb {decoded_index}. Progress: {progress:.2f}%")
+
+                # Send updated progress to client
+                client_socket.send(f"PROGRESS:{progress:.2f}".encode('utf-8'))
+            elif response == "INVALID":
+                # Client could not decode this packet. We'll just continue sending.
+                pass
+            elif response == "DONE":
+                break
+
+            current_index = (current_index + 1) % total_crumbs
+
+        # Once done, send END signal
         client_socket.send(b'END')
+
     except Exception as e:
         print(f"[ERROR] {e}")
     finally:
         client_socket.close()
 
-# Main server logic
+
 def start_server():
+    # Read file and convert to crumbs
+    with open(FILE_PATH, 'rb') as f:
+        file_bytes = f.read()
+
+    crumbs = []
+    for byte in file_bytes:
+        # Extract four 2-bit sequences from the byte
+        for shift_amount in [6, 4, 2, 0]:
+            crumb_val = (byte >> shift_amount) & 0b11
+            crumb_str = f"{crumb_val:02b}"
+            if crumb_str in keys:
+                crumbs.append(crumb_str)
+            # If not in keys, skip silently
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
         server_socket.bind((HOST, PORT))
         server_socket.listen(5)
         print(f"[INFO] Server listening on {HOST}:{PORT}")
 
-        with open(FILE_PATH, 'rb') as f:
-            file_bytes = f.read()
-
-        crumbs = []
-        for byte in file_bytes:
-            crumb1 = f"{(byte >> 6) & 0b11:02b}"
-            crumb2 = f"{(byte >> 4) & 0b11:02b}"
-            if crumb1 in keys and crumb2 in keys:
-                crumbs.extend([crumb1, crumb2])
-        crumbs = []
-        for byte in file_bytes:
-            crumb1 = f"{(byte >> 6) & 0b11:02b}"
-            crumb2 = f"{(byte >> 4) & 0b11:02b}"
-            if crumb1 in keys and crumb2 in keys:
-                crumbs.append(crumb1)
-                crumbs.append(crumb2)
-
         while True:
             client_socket, addr = server_socket.accept()
             print(f"[INFO] Connection from {addr} established.")
-            client_thread = threading.Thread(target=handle_client, args=(client_socket, file_bytes, crumbs))
-            client_thread.start()
+            threading.Thread(target=client_handler, args=(client_socket, crumbs)).start()
 
 if __name__ == "__main__":
     start_server()
